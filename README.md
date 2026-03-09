@@ -25,8 +25,8 @@ Developer workstation
   |     source_profile = default
   |
   +-- scripts/run-sandbox.sh
-        -> docker sandbox run copilot ...
-        -> mount ~/.aws read-only OR inject AWS_* env vars
+  -> docker sandbox create/run copilot ...
+  -> stage ~/.aws or short-lived credentials inside the sandbox
         -> Copilot can call aws s3 ls / aws ec2 describe-*
         -> IAM denies write operations
 
@@ -79,6 +79,22 @@ terraform -chdir=terraform apply
 ./scripts/run-sandbox.sh
 ```
 
+If your AWS CLI uses an SSO profile that is not named `default`, pass it explicitly:
+
+```bash
+./scripts/setup-profile.sh --source-profile AdministratorAccess-331208789346
+```
+
+If the account already has the GitHub OIDC provider, import it after `init` and before the first `apply`:
+
+```bash
+terraform -chdir=terraform import \
+  aws_iam_openid_connect_provider.github_actions \
+  arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
+terraform -chdir=terraform plan
+terraform -chdir=terraform apply
+```
+
 Why this is the recommended path:
 
 - The AWS CLI handles `AssumeRole` automatically.
@@ -96,6 +112,8 @@ Use this when you want to teach the mechanics of STS directly or when mounting `
 
 ## Quick start: GitHub-hosted path
 
+This repository does not apply Terraform from GitHub Actions. Provision the IAM resources locally, then let the workflow only assume the created role.
+
 1. Apply the Terraform stack and capture the `role_arn` output.
 2. In GitHub, create an environment named `copilot`.
 3. Add an environment variable named `AWS_ROLE_ARN` with the Terraform output value.
@@ -105,6 +123,7 @@ Use this when you want to teach the mechanics of STS directly or when mounting `
 ## Building the optional custom sandbox image
 
 The local runner script will automatically use `copilot-aws-sandbox:latest` when that image exists.
+For the local AWS demos, build it first so the sandbox includes the AWS CLI.
 
 ```bash
 docker build -t copilot-aws-sandbox:latest sandbox
@@ -129,7 +148,7 @@ That image layers AWS CLI v2 and `jq` onto Docker's Copilot sandbox base image.
 
 ## Important implementation note: existing GitHub OIDC providers
 
-This repo keeps Terraform simple. If your AWS account already has `token.actions.githubusercontent.com` configured, import it into Terraform state instead of creating a duplicate:
+This repo keeps Terraform simple. If your AWS account already has `token.actions.githubusercontent.com` configured, import it into Terraform state from your local machine instead of creating a duplicate:
 
 ```bash
 terraform -chdir=terraform import \

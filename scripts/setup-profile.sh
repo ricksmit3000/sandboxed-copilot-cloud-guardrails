@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROFILE_NAME="copilot-sandbox"
-SOURCE_PROFILE="default"
+SOURCE_PROFILE="${SOURCE_PROFILE:-}"
 AWS_REGION="${AWS_REGION:-eu-west-1}"
 SESSION_DURATION=3600
 ROLE_ARN="${ROLE_ARN:-}"
@@ -13,10 +13,11 @@ AWS_CONFIG_PATH="${AWS_CONFIG_FILE:-${HOME}/.aws/config}"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./scripts/setup-profile.sh [--role-arn ARN] [--region REGION] [--duration SECONDS]
+  ./scripts/setup-profile.sh [--role-arn ARN] [--source-profile NAME] [--region REGION] [--duration SECONDS]
 
 Creates the [profile copilot-sandbox] entry used by the recommended local flow.
 If --role-arn is omitted, the script reads terraform output from ./terraform.
+If --source-profile is omitted, the script prefers AWS_PROFILE, then default, then a single existing non-target profile.
 USAGE
 }
 
@@ -34,10 +35,45 @@ resolve_role_arn() {
   terraform -chdir="${REPO_ROOT}/terraform" output -raw role_arn
 }
 
+resolve_source_profile() {
+  local configured_profiles=()
+
+  if [[ -n "${SOURCE_PROFILE}" ]]; then
+    printf '%s\n' "${SOURCE_PROFILE}"
+    return 0
+  fi
+
+  if [[ -n "${AWS_PROFILE:-}" ]]; then
+    printf '%s\n' "${AWS_PROFILE}"
+    return 0
+  fi
+
+  if command -v aws >/dev/null 2>&1; then
+    mapfile -t configured_profiles < <(aws configure list-profiles 2>/dev/null | grep -Fxv "${PROFILE_NAME}" || true)
+  fi
+
+  if printf '%s\n' "${configured_profiles[@]}" | grep -Fxq "default"; then
+    printf '%s\n' "default"
+    return 0
+  fi
+
+  if [[ "${#configured_profiles[@]}" -eq 1 ]]; then
+    printf '%s\n' "${configured_profiles[0]}"
+    return 0
+  fi
+
+  echo "error: could not determine a source profile; pass --source-profile explicitly." >&2
+  return 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --role-arn)
       ROLE_ARN="$2"
+      shift 2
+      ;;
+    --source-profile)
+      SOURCE_PROFILE="$2"
       shift 2
       ;;
     --region)
@@ -66,6 +102,7 @@ if ! [[ "${SESSION_DURATION}" =~ ^[0-9]+$ ]]; then
 fi
 
 ROLE_ARN="$(resolve_role_arn)"
+SOURCE_PROFILE="$(resolve_source_profile)"
 PROFILE_HEADER="[profile ${PROFILE_NAME}]"
 
 mkdir -p "$(dirname "${AWS_CONFIG_PATH}")"

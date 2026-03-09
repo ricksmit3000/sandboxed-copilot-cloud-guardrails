@@ -22,8 +22,9 @@ Developer workstation
   |     -> temporary AWS_* environment variables
   |
   +-- scripts/run-sandbox.sh
-        -> docker sandbox run copilot ...
-        -> mounts ~/.aws read-only OR injects temporary env vars
+  -> docker sandbox create/run copilot ...
+  -> mounts ~/.aws as an extra read-only workspace when needed
+  -> stages sandbox-local AWS config before starting the agent
 
 GitHub-hosted path
   |
@@ -46,11 +47,11 @@ AWS account
 
 ### Recommended: profile-based access
 
-`setup-profile.sh` writes a dedicated AWS CLI profile named `copilot-sandbox`. When the sandbox runs with `AWS_PROFILE=copilot-sandbox`, the AWS CLI automatically assumes the Terraform-provisioned role, caches credentials in `~/.aws/cli/cache`, and refreshes them when needed.
+`setup-profile.sh` writes a dedicated AWS CLI profile named `copilot-sandbox`. `run-sandbox.sh` copies the host AWS config into the sandbox and writes a sandbox-local `[default]` profile that assumes the Terraform-provisioned role. That keeps the agent on the read-only role without relying on unsupported `docker sandbox run -e` flags.
 
 ### Explicit: token vending
 
-`vend-token.sh` exposes the STS call directly. It prints `export` statements for `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION`, and `AWS_REGION` so you can inject them into a short-lived sandbox session.
+`vend-token.sh` exposes the STS call directly. It prints `export` statements for `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION`, and `AWS_REGION`; `run-sandbox.sh` then writes those temporary credentials into the sandbox's local AWS files before starting Copilot.
 
 ## Hosted path details
 

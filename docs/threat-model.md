@@ -18,7 +18,7 @@ This demo is designed to reduce the blast radius when an AI coding agent needs c
 
 ## Residual risks
 
-- The recommended profile path mounts `~/.aws` read-only into the sandbox. That is convenient, but it still exposes the source profile configuration to the sandbox runtime.
+- The recommended profile path exposes the host `~/.aws` directory to the sandbox during setup so the launcher can stage sandbox-local AWS config. That is convenient, but it still exposes the source profile configuration to the sandbox runtime.
 - `ReadOnlyAccess` is intentionally broad for demo simplicity. Production environments usually want a custom least-privilege policy instead.
 - If session duration is set too high, temporary credentials remain useful for longer than necessary.
 
