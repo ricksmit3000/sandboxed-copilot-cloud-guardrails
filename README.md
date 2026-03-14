@@ -126,25 +126,28 @@ flowchart TD
 
 The important boundary is this: Safehouse only constrains the local runtime. It does not create Azure identity, assign roles, or configure Copilot to start the Azure MCP Server. Those pieces still have to exist already.
 
-The simplest company-managed setup looks like this:
+The fastest way to adopt this into another repo is:
 
 ```bash
-cp -R safehouse /path/to/your/project/
-cp -R .copilot /path/to/your/project/
-
-cat > /path/to/your/project/.env.copilot-agent <<'EOF'
-export AZURE_TENANT_ID="<tenant-id>"
-export AZURE_CLIENT_ID="<client-id>"
-export AZURE_CLIENT_CERTIFICATE_PATH="$HOME/.config/copilot-agent/agent-cert.pem"
-EOF
+./scripts/adopt-company-managed-identity.sh /path/to/your/project <tenant-id> <client-id>
 ```
 
-Then in that project:
+This copies `safehouse/` and `.copilot/` into the target project and writes a `.env.copilot-agent` file pointing at `~/.config/copilot-agent/agent-cert.pem` by default.
+
+If your certificate lives elsewhere, pass it explicitly:
+
+```bash
+./scripts/adopt-company-managed-identity.sh /path/to/your/project <tenant-id> <client-id> /path/to/agent-cert.pem
+```
+
+Then in the target project:
 
 ```bash
 source safehouse/copilot-safehouse.sh
 copilot-safe
 ```
+
+If you prefer not to use the helper script, you can still copy `safehouse/` and `.copilot/` manually and create `.env.copilot-agent` yourself.
 
 ## How it works
 

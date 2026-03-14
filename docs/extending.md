@@ -18,7 +18,7 @@ az role assignment create \
 The `Reader` role covers the ARM control plane. For data-plane access:
 
 | Service | Data-plane role |
-|---------|----------------|
+| --- | --- |
 | Storage (blobs) | `Storage Blob Data Reader` |
 | Cosmos DB | `Cosmos DB Built-in Data Reader` |
 | Key Vault (secrets) | `Key Vault Secrets User` |
@@ -30,6 +30,24 @@ Replace `@azure/mcp@latest` in `.copilot/mcp.json` with a pinned version:
 ```json
 "args": ["-y", "@azure/mcp@0.5.2", "server", "start"]
 ```
+
+## Reuse in an existing company-managed setup
+
+If your company already provisions the Entra app, service principal, certificate credential, and read-only RBAC assignment, you can reuse only the local integration pieces from this repo.
+
+Use the helper script to copy `safehouse/`, `.copilot/mcp.json`, and generate `.env.copilot-agent` in another project:
+
+```bash
+./scripts/adopt-company-managed-identity.sh /path/to/your/project <tenant-id> <client-id>
+```
+
+If the certificate PEM is not at the default path, pass it explicitly:
+
+```bash
+./scripts/adopt-company-managed-identity.sh /path/to/your/project <tenant-id> <client-id> /path/to/agent-cert.pem
+```
+
+This does not provision any Azure resources. It assumes the service principal and RBAC already exist.
 
 ## GitHub-hosted path (federated identity)
 

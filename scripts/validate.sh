@@ -182,7 +182,7 @@ if command -v safehouse &>/dev/null; then
         fail "Safehouse did NOT block access to ~/${SENSITIVE_DIR}"
       fi
     else
-      skip "~/${SENSITIVE_DIR} does not exist on this machine"
+      skip "${HOME}/${SENSITIVE_DIR} does not exist on this machine"
     fi
   done
 else

@@ -4,7 +4,7 @@
 
 ## Layers
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Layer 1: Agent Safehouse (macOS sandbox-exec)                      │
 │  ┌───────────────────────────────────────────────────────────────┐  │
@@ -59,7 +59,7 @@ The Azure MCP Server (`@azure/mcp`) provides a structured tool interface for Cop
 
 ## Credential flow
 
-```
+```text
 Shell wrapper (copilot-safehouse.sh)
   │
   ├── exports AZURE_TENANT_ID, AZURE_CLIENT_ID,
@@ -93,10 +93,50 @@ The previous version of this repo used Docker Desktop's sandbox feature (Linux m
 The Azure identity (app registration, service principal, certificate, role assignment) is managed by Terraform in the `terraform/` directory using three providers:
 
 | Provider | Purpose |
-|----------|---------|
+| --- | --- |
 | `hashicorp/tls` | Generates the RSA private key and self-signed certificate in-memory |
 | `hashicorp/azuread` | Creates the Entra app registration, service principal, and certificate credential |
 | `hashicorp/azurerm` | Assigns the Reader role at subscription scope |
 | `hashicorp/local` | Writes the combined PEM and `.env.copilot-agent` to local disk |
 
 Terraform state holds the RSA private key in plaintext. For anything beyond a personal demo, use encrypted remote state (e.g., Azure Blob Storage with a Customer Managed Key). See `docs/threat-model.md` for details.
+
+## Company-managed provisioning
+
+In some environments, the Azure identity lifecycle is owned by a central platform or security team instead of by the developer's repo. In that model, this repository's `terraform/` directory is optional.
+
+The responsibility split looks like this:
+
+- Platform team: create the Entra app and service principal, upload the certificate credential, and assign `Reader` or another scoped read-only role
+- Developer project: carry the local runtime pieces only, namely `safehouse/`, `.copilot/mcp.json`, and `.env.copilot-agent`
+- Developer workstation: store the certificate PEM locally and launch Copilot through the Safehouse wrapper
+
+That means Safehouse is not the whole solution by itself. It enforces local filesystem isolation, but it does not provision Azure identity and it does not configure Copilot's Azure MCP integration unless the project also includes `.copilot/mcp.json` and the required `AZURE_*` environment variables.
+
+For teams adopting this pattern into an existing repo, use `scripts/adopt-company-managed-identity.sh` to copy the local integration files and generate `.env.copilot-agent` for a pre-provisioned service principal.
+
+```mermaid
+flowchart LR
+      A[Platform team] --> B[Entra app and service principal]
+      B --> C[Certificate credential]
+      B --> D[Reader or scoped read-only RBAC]
+      C --> E[Developer workstation PEM]
+      E --> F[Project env file]
+      F --> G[Safehouse wrapper]
+      G --> H[Copilot CLI]
+      H --> I[Azure MCP Server]
+      I --> J[Azure APIs]
+```
+
+The repo supports both models:
+
+- Self-provisioned demo: use Terraform from this repo
+- Company-managed identity: reuse only the local integration pieces
+
+The control boundary is the same in both cases: the agent runs locally inside Safehouse and authenticates with a dedicated service principal constrained by Azure RBAC.
+
+Next steps in the target project:
+      1. Confirm the certificate exists at: ${CERT_PATH}
+      2. source safehouse/copilot-safehouse.sh
+      3. copilot-safe
+EOF
