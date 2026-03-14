@@ -1,0 +1,36 @@
+;; ─────────────────────────────────────────────────────────────────────
+;; local-overrides.sb — Agent Safehouse policy overrides for Copilot CLI
+;;
+;; Appended to Safehouse's built-in deny-first profile via --append-profile.
+;; Safehouse already provides: project directory R/W, toolchains R/O,
+;; deny everything else by default.
+;;
+;; This file adds access for:
+;;   - Copilot CLI state directory (R/W)
+;;   - Agent certificate for Azure auth (R/O)
+;;   - GitHub CLI config for auth fallback (R/O)
+;;
+;; And explicitly denies sensitive directories as defense in depth.
+;; ─────────────────────────────────────────────────────────────────────
+
+;; Copilot CLI state — R/W for session state, command history, logs
+(allow file-read* file-write*
+  (home-subpath "/.copilot"))
+
+;; Agent certificate — R/O for Azure MCP Server certificate auth
+(allow file-read*
+  (home-subpath "/.config/copilot-agent"))
+
+;; GitHub CLI config — R/O for gh auth fallback
+(allow file-read*
+  (home-subpath "/.config/gh"))
+
+;; ── Explicit denials (defense in depth) ──────────────────────────────
+;; These block access to sensitive credential stores even if broader
+;; allow rules are added above or by Safehouse's built-in profile.
+
+(deny file-read* file-write*
+  (home-subpath "/.azure")
+  (home-subpath "/.ssh")
+  (home-subpath "/.aws")
+  (home-subpath "/.gnupg"))

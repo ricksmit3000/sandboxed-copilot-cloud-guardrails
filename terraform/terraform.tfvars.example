@@ -1,6 +1,12 @@
-aws_region            = "eu-west-1"
-trusted_principal_arn = "arn:aws:iam::123456789012:user/your-developer-user"
-github_org            = "your-github-org"
-github_repo           = "your-repo"
-session_duration      = 3600
-role_name             = "CopilotSandboxReadOnly"
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it.
+#
+# Find your subscription ID:
+#   az account show --query id -o tsv
+#
+# Find available subscriptions:
+#   az account list --query "[].{name:name, id:id}" -o table
+
+subscription_id    = "00000000-0000-0000-0000-000000000000"
+app_name           = "copilot-sandbox-reader"
+cert_validity_days = 365

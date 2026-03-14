@@ -1,5 +1,20 @@
+# macOS
+.DS_Store
+
+# Azure credentials (written by Terraform)
+.env.copilot-agent
+
+# Certificate and key files
+*.pem
+*.key
+*.pfx
+*.cer
+
+# Node modules (npx / MCP server cache)
+node_modules/
+
+# Terraform — state and tfvars contain secrets, never commit
 .terraform/
 *.tfstate
 *.tfstate.*
 terraform.tfvars
-.DS_Store

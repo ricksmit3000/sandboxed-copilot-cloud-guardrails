@@ -1,173 +1,189 @@
 # sandboxed-copilot-cloud-guardrails
 
-> Give your AI coding agent cloud access with guardrails - not the keys to the kingdom.
+> Give your AI coding agent Azure access with guardrails — not the keys to the kingdom.
 
-This repository demonstrates how to give GitHub Copilot short-lived, read-only AWS access without handing over broad, persistent credentials. It combines Docker Sandbox isolation with a Terraform-provisioned IAM role that both local sandboxes and GitHub-hosted coding agents can assume.
+This repository demonstrates how to give GitHub Copilot CLI scoped, read-only Azure access through a dedicated Entra service principal — never your full user identity. It combines Agent Safehouse for macOS kernel-level sandboxing with certificate-based authentication via the Azure MCP Server.
 
 ## What this repo demonstrates
 
-Three execution paths share one AWS guardrail:
-
-| Path | Agent runtime | Isolation layer | Cloud auth mechanism |
-| --- | --- | --- | --- |
-| Local (profile) | Copilot in Docker Sandbox | Docker Desktop sandbox | AWS CLI profile that auto-assumes the Terraform role |
-| Local (explicit) | Copilot in Docker Sandbox | Docker Desktop sandbox | `vend-token.sh` issuing STS credentials as environment variables |
-| GitHub-hosted | Copilot coding agent in GitHub Actions | GitHub-hosted runner | GitHub OIDC + `aws-actions/configure-aws-credentials` |
+| Aspect | Implementation |
+| --- | --- |
+| Agent runtime | Copilot CLI |
+| Isolation layer | Agent Safehouse (macOS `sandbox-exec`) |
+| Cloud auth | Certificate-based Entra service principal |
+| Tool surface | Azure MCP Server (`@azure/mcp`) |
+| Cloud guardrail | Reader role at subscription scope |
 
 ## Architecture
 
 ```text
-Developer workstation
-  |
-  +-- ~/.aws/config
-  |     [profile copilot-sandbox]
-  |     role_arn = arn:aws:iam::<account>:role/CopilotSandboxReadOnly
-  |     source_profile = default
-  |
-  +-- scripts/run-sandbox.sh
-  -> docker sandbox create/run copilot ...
-  -> stage ~/.aws or short-lived credentials inside the sandbox
-        -> Copilot can call aws s3 ls / aws ec2 describe-*
-        -> IAM denies write operations
+Developer workstation (macOS)
+  │
+  ├── safehouse/copilot-safehouse.sh
+  │     → sources .env.copilot-agent (AZURE_TENANT_ID, CLIENT_ID, CERT_PATH)
+  │     → sets AZURE_TOKEN_CREDENTIALS=EnvironmentCredential
+  │     → safehouse sandbox-exec with local-overrides.sb
+  │       → copilot --dangerously-skip-permissions
+  │         → spawns @azure/mcp as MCP child process
+  │           → authenticates via EnvironmentCredential (certificate)
+  │           → queries ARM API with Reader token
+  │           → Reader role denies all mutations
+  │
+  ├── ~/.config/copilot-agent/agent-cert.pem  (R/O from sandbox)
+  │
+  └── safehouse/local-overrides.sb
+        → deny default (Safehouse built-in)
+        → allow: project dir (R/W), ~/.copilot (R/W)
+        → allow: cert dir (R/O), ~/.config/gh (R/O)
+        → deny: ~/.azure, ~/.ssh, ~/.aws, ~/.gnupg
 
-GitHub-hosted path
-  |
-  +-- .github/workflows/copilot-setup-steps.yml
-        -> GitHub OIDC token
-        -> STS AssumeRoleWithWebIdentity
-        -> AWS_* exposed to the coding agent job
-
-AWS account
-  |
-  +-- GitHub OIDC provider
-  +-- CopilotSandboxReadOnly IAM role
-        -> trust: local principal + GitHub OIDC
-        -> permissions: ReadOnlyAccess
-        -> max session duration: configurable
+Azure tenant
+  │
+  ├── App registration: copilot-sandbox-reader
+  ├── Service principal with certificate credential
+  └── Role assignment: Reader at subscription scope
 ```
 
 ## Prerequisites
 
-- Docker Desktop with Docker Sandbox support
-- GitHub Copilot access
-- Terraform 1.5+
-- AWS account and an IAM principal that can create roles and OIDC providers
-- AWS CLI for local workflows
-- `jq` for the explicit token-vending path
+- macOS (Agent Safehouse uses `sandbox-exec`)
+- [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli)
+- [Agent Safehouse](https://agent-safehouse.dev) — `brew install eugene1g/safehouse/agent-safehouse`
+- Node.js / npx (for the Azure MCP Server)
+- [Terraform](https://developer.hashicorp.com/terraform/install) 1.5+
+- Azure CLI (`az`) — for initial `az login` only
+- An Azure subscription with Owner or Contributor access (for initial role assignment)
 
 ## Repository layout
 
 ```text
-terraform/                  AWS provider, IAM role, OIDC provider, outputs, tfvars example
-scripts/                    Local setup, token vending, and sandbox launch helpers
-sandbox/                    Dockerfile for a custom sandbox image and Copilot config
-.github/workflows/          Hosted setup and Terraform validation workflows
-.github/copilot/agents/     Custom agent persona for read-only cloud discovery
-.copilot/                   Local MCP placeholder configuration
+terraform/                  Entra app registration, certificate generation, Reader role (azuread + azurerm + tls)
+scripts/                    Validation helper
+safehouse/                  Sandbox policy and Copilot CLI wrapper
+.copilot/                   Azure MCP Server configuration
+.github/copilot/agents/     Custom agent persona for read-only Azure discovery
+.github/workflows/          ShellCheck CI
 examples/                   Demo prompts and expected outcomes
 docs/                       Architecture, threat model, and extension notes
 ```
 
-## Quick start: local profile path (recommended)
+## Quick start
+
+### 1. Provision the Entra service principal
 
 ```bash
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-$EDITOR terraform/terraform.tfvars
+# Edit terraform.tfvars: set subscription_id to your Azure subscription
 terraform -chdir=terraform init
 terraform -chdir=terraform apply
-./scripts/setup-profile.sh
-./scripts/run-sandbox.sh
 ```
 
-If your AWS CLI uses an SSO profile that is not named `default`, pass it explicitly:
+This generates a self-signed certificate, creates an Entra app registration and service principal, uploads the public cert, assigns Reader at subscription scope, and writes `~/.config/copilot-agent/agent-cert.pem` and `.env.copilot-agent` to disk.
+
+### 2. Load the shell wrapper
 
 ```bash
-./scripts/setup-profile.sh --source-profile AdministratorAccess-331208789346
+source safehouse/copilot-safehouse.sh
 ```
 
-If the account already has the GitHub OIDC provider, import it after `init` and before the first `apply`:
+This exports the service principal credentials and defines the `copilot-safe` function. Add it to your `~/.zshrc` for persistent use.
+
+### 3. Launch sandboxed Copilot CLI
 
 ```bash
-terraform -chdir=terraform import \
-  aws_iam_openid_connect_provider.github_actions \
-  arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
-terraform -chdir=terraform plan
-terraform -chdir=terraform apply
+copilot-safe
 ```
 
-Why this is the recommended path:
+This starts Copilot CLI inside a Safehouse sandbox with the Azure MCP Server configured. The agent can read Azure resources but cannot write, and cannot access sensitive directories on your workstation.
 
-- The AWS CLI handles `AssumeRole` automatically.
-- Temporary credentials are cached and refreshed for you.
-- The sandbox never receives long-lived keys directly.
+## Using a company-managed Azure identity
 
-## Quick start: local explicit path
+If your company already provisions the Azure side, you do not need to copy the full `terraform/` directory or run `terraform apply` from this repo. You can reuse only the local integration pieces, as long as your platform team gives you:
+
+- An existing Entra service principal with the required Azure RBAC role, ideally `Reader`
+- The tenant ID and client ID for that service principal
+- A certificate PEM file containing the private key, stored locally at `~/.config/copilot-agent/agent-cert.pem` or another path exported as `AZURE_CLIENT_CERTIFICATE_PATH`
+
+In that scenario, the minimum repo-local pieces are:
+
+- `safehouse/copilot-safehouse.sh`
+- `safehouse/local-overrides.sb`
+- `.copilot/mcp.json`
+- Either a `.env.copilot-agent` file or equivalent shell exports for `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_CERTIFICATE_PATH`
+
+```mermaid
+flowchart TD
+  A[Company platform team] --> B[Entra app and service principal]
+  B --> C[Reader role or scoped read role]
+  B --> D[Certificate credential]
+  D --> E[Developer workstation: agent-cert.pem]
+  E --> F[Repo: copilot-safehouse.sh]
+  F --> G[Safehouse sandbox]
+  G --> H[Copilot CLI]
+  H --> I[Azure MCP Server via .copilot/mcp.json]
+  I --> J[Azure ARM APIs]
+```
+
+The important boundary is this: Safehouse only constrains the local runtime. It does not create Azure identity, assign roles, or configure Copilot to start the Azure MCP Server. Those pieces still have to exist already.
+
+The simplest company-managed setup looks like this:
 
 ```bash
-eval "$(./scripts/vend-token.sh)"
-./scripts/run-sandbox.sh --explicit
+cp -R safehouse /path/to/your/project/
+cp -R .copilot /path/to/your/project/
+
+cat > /path/to/your/project/.env.copilot-agent <<'EOF'
+export AZURE_TENANT_ID="<tenant-id>"
+export AZURE_CLIENT_ID="<client-id>"
+export AZURE_CLIENT_CERTIFICATE_PATH="$HOME/.config/copilot-agent/agent-cert.pem"
+EOF
 ```
 
-Use this when you want to teach the mechanics of STS directly or when mounting `~/.aws` into the sandbox is not practical.
-
-## Quick start: GitHub-hosted path
-
-This repository does not apply Terraform from GitHub Actions. Provision the IAM resources locally, then let the workflow only assume the created role.
-
-1. Apply the Terraform stack and capture the `role_arn` output.
-2. In GitHub, create an environment named `copilot`.
-3. Add an environment variable named `AWS_ROLE_ARN` with the Terraform output value.
-4. Keep `.github/workflows/copilot-setup-steps.yml` on the default branch.
-5. Assign an issue to Copilot coding agent.
-
-## Building the optional custom sandbox image
-
-The local runner script will automatically use `copilot-aws-sandbox:latest` when that image exists.
-For the local AWS demos, build it first so the sandbox includes the AWS CLI.
+Then in that project:
 
 ```bash
-docker build -t copilot-aws-sandbox:latest sandbox
+source safehouse/copilot-safehouse.sh
+copilot-safe
 ```
 
-That image layers AWS CLI v2 and `jq` onto Docker's Copilot sandbox base image.
+## How it works
 
-## Credential strategies
+Three independent safety layers:
 
-| Strategy | Best for | Auto-refresh | Trade-offs |
-| --- | --- | --- | --- |
-| AWS profile | Daily use and demos | Yes | Requires mounting `~/.aws` read-only into the sandbox |
-| Explicit STS vending | Teaching and constrained environments | No | Credentials expire and must be re-vended |
-| GitHub OIDC | Hosted issue workflows | Per workflow run | Requires Actions and repo environment setup |
+1. **Agent Safehouse** — macOS `sandbox-exec` enforces a deny-first filesystem policy. The agent can only access the project directory, Copilot CLI state, and the certificate. `~/.azure`, `~/.ssh`, `~/.aws` are blocked at the kernel level.
+
+2. **Certificate-based service principal** — The agent authenticates as a dedicated Entra service principal, not as you. `AZURE_TOKEN_CREDENTIALS=EnvironmentCredential` prevents fallback to `az login` or interactive browser auth.
+
+3. **Reader RBAC role** — Azure denies all write operations server-side, regardless of what the agent attempts. The agent persona in `cloud-reader.md` reinforces this at the prompt level.
+
+## Validation
+
+```bash
+./scripts/validate.sh
+```
+
+Runs six tests: prerequisites, certificate validity, service principal login, Reader role assignment, write-is-blocked, and Safehouse filesystem isolation.
 
 ## Demo walkthroughs
 
-- [Demo 1: Read succeeds with S3](examples/01-read-s3.md)
-- [Demo 2: Read succeeds across EC2 and security groups](examples/02-read-ec2.md)
-- [Demo 3: Write fails with AccessDenied](examples/03-write-fails.md)
-- [Demo 4: Explicit credentials expire](examples/04-creds-expire.md)
-
-## Important implementation note: existing GitHub OIDC providers
-
-This repo keeps Terraform simple. If your AWS account already has `token.actions.githubusercontent.com` configured, import it into Terraform state from your local machine instead of creating a duplicate:
-
-```bash
-terraform -chdir=terraform import \
-  aws_iam_openid_connect_provider.github_actions \
-  arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com
-```
+- [Demo 1: List resource groups (read succeeds)](examples/01-list-resource-groups.md)
+- [Demo 2: Read VMs and networking](examples/02-read-vms.md)
+- [Demo 3: Write blocked (AuthorizationFailed)](examples/03-write-blocked.md)
+- [Demo 4: Safehouse blocks sensitive files](examples/04-safehouse-blocks.md)
 
 ## Further reading
 
-- [Architecture](docs/architecture.md)
-- [Threat model](docs/threat-model.md)
-- [Local vs hosted](docs/local-vs-hosted.md)
-- [Extending the pattern](docs/extending.md)
+- [Architecture](docs/architecture.md) — defense-in-depth layers and credential flow
+- [Threat model](docs/threat-model.md) — what this protects against, and what it doesn't
+- [Local vs. hosted](docs/local-vs-hosted.md) — why local-only for now
+- [Extending the pattern](docs/extending.md) — resource group scoping, federated identity, version pinning, Linux alternatives
 
-## What is intentionally out of scope for v1
+## Out of scope for v1
 
-- A custom least-privilege IAM policy
-- Multi-account role chaining
-- CloudTrail session tagging and dashboards
-- Non-AWS cloud providers
+- GitHub-hosted Copilot coding agent path (federated identity credentials)
+- Write-capable roles for trusted workflows
+- Multi-subscription management group scoping
+- Linux and Windows support
+- Network hostname filtering
 
-These are covered as extension points in `docs/extending.md`.
+These are documented as extension points in [`docs/extending.md`](docs/extending.md).

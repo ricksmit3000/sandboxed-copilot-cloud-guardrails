@@ -1,27 +1,37 @@
-# Local vs hosted
+# Local vs. hosted: why this repo is local-only (for now)
 
-Use the same IAM role in both paths, but choose the execution environment that matches the workflow.
+## Current scope
 
-| Option | Best for | Strengths | Trade-offs |
-| --- | --- | --- | --- |
-| Local profile-based sandbox | Daily demos and iterative exploration | Auto-refreshing credentials, simple UX, reuses the AWS CLI credential chain | Requires mounting `~/.aws` into the sandbox |
-| Local explicit token vending | Teaching the mechanics, locked-down environments | Makes STS visible, easy to reason about, short TTL by default | Requires re-vending credentials after expiry |
-| GitHub-hosted coding agent | Assigned issues and hosted automation | No workstation dependency, no stored AWS secrets, repo-scoped OIDC trust | Requires repo/environment configuration and GitHub Actions support |
+This repo demonstrates a **local-only** path: Copilot CLI running inside Agent Safehouse on a macOS workstation, authenticated as an Entra service principal with Reader access via the Azure MCP Server.
 
-## Choose local profile mode when
+| Aspect | Local path (this repo) |
+|--------|----------------------|
+| Agent runtime | Copilot CLI |
+| Isolation | Agent Safehouse (macOS sandbox-exec) |
+| Cloud auth | Certificate-based Entra service principal |
+| Tool surface | Azure MCP Server (`@azure/mcp`) |
+| Target audience | Developers on macOS |
 
-- You want the lowest-friction demo.
-- You already have a trusted source profile configured locally.
-- You want AWS CLI auto-refresh to hide token expiry from the walkthrough.
+## Why not GitHub-hosted (yet)?
 
-## Choose explicit local mode when
+The Azure equivalent of a GitHub-hosted path is achievable using **federated identity credentials** on the Entra app registration, which allows GitHub Actions to exchange an OIDC token for an Azure access token without storing any secrets.
 
-- You need to show exactly how `sts:AssumeRole` works.
-- You cannot mount `~/.aws` into the sandbox.
-- You want expiring credentials to be part of the teaching moment.
+This is out of scope for v1 because:
 
-## Choose the hosted path when
+1. **Agent Safehouse is macOS-only** — the GitHub-hosted runner is Linux, so a different sandboxing approach would be needed.
+2. **The demo focus is workstation guardrails** — showing developers how to safely give a local AI agent cloud access.
+3. **Federated credentials add complexity** — the Entra app registration, trust policy, and GitHub environment configuration are a separate tutorial.
 
-- You want Copilot coding agent to work from GitHub issues.
-- You prefer repo-scoped OIDC over workstation-scoped credentials.
-- You want the same guardrails without depending on a local Docker Desktop setup.
+## Adding the GitHub-hosted path
+
+See `docs/extending.md` for step-by-step instructions on adding federated identity credentials for GitHub Actions OIDC.
+
+## Platform limitations
+
+| Platform | Safehouse support | Alternative |
+|----------|------------------|------------|
+| macOS | Native (sandbox-exec) | — |
+| Linux | Not supported | Firejail, bubblewrap, Docker |
+| Windows | Not supported | Windows Sandbox, WSL + Firejail |
+
+For cross-platform teams, Docker-based isolation remains a viable alternative.
