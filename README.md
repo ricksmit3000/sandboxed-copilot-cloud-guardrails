@@ -46,13 +46,29 @@ Azure tenant
 
 ## Prerequisites
 
+### Core runtime prerequisites
+
 - macOS (Agent Safehouse uses `sandbox-exec`)
 - [GitHub Copilot CLI](https://docs.github.com/en/copilot/github-copilot-in-the-cli)
 - [Agent Safehouse](https://agent-safehouse.dev) — `brew install eugene1g/safehouse/agent-safehouse`
 - Node.js / npx (for the Azure MCP Server)
+
+These are enough to run the company-managed setup, assuming your platform team already provides the Azure identity, certificate, and RBAC assignment.
+
+### Self-provisioned demo prerequisites
+
 - [Terraform](https://developer.hashicorp.com/terraform/install) 1.5+
-- Azure CLI (`az`) — for initial `az login` only
+- Azure CLI (`az`) for Azure login and subscription-scoped role assignment workflows
 - An Azure subscription with Owner or Contributor access (for initial role assignment)
+
+These are only required if you want to provision the demo identity from this repo's `terraform/` directory.
+
+### Validation prerequisites
+
+- Azure CLI (`az`)
+- `openssl`
+
+The validation script in `scripts/validate.sh` uses Azure CLI to verify service principal login, Reader RBAC assignment, and that write operations are blocked.
 
 ## Repository layout
 
@@ -166,6 +182,8 @@ Three independent safety layers:
 ```
 
 Runs six tests: prerequisites, certificate validity, service principal login, Reader role assignment, write-is-blocked, and Safehouse filesystem isolation.
+
+`validate.sh` requires Azure CLI because it performs live Azure checks. It is useful for the self-provisioned demo and optional for company-managed setups.
 
 ## Demo walkthroughs
 
